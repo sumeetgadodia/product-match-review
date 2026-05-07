@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Check,
   X,
@@ -62,12 +63,41 @@ function ReviewConsole() {
   const safeIndex = Math.min(index, Math.max(filteredGroups.length - 1, 0));
   const group = filteredGroups[safeIndex];
 
+  // Snapshot the set of match IDs visible under the current filter so that
+  // accepting/rejecting a card does not immediately remove it from view.
+  // The snapshot is rebuilt whenever the user changes filter, navigates to
+  // another product, or refreshes.
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  const groupId = group?.mainProduct.product_id;
+  const lastKeyRef = useRef<string>("");
+  useEffect(() => {
+    const key = `${groupId ?? ""}|${statusFilter}|${typeFilter}`;
+    if (lastKeyRef.current === key) return;
+    lastKeyRef.current = key;
+    if (!group) {
+      setVisibleIds(new Set());
+      return;
+    }
+    const ids = group.matches
+      .filter((m) => (statusFilter === "all" ? true : m.status === statusFilter))
+      .map((m) => m.product_id);
+    setVisibleIds(new Set(ids));
+  }, [group, groupId, statusFilter, typeFilter]);
+
   const visibleMatches = useMemo(() => {
     if (!group) return [];
-    return group.matches.filter((m) =>
-      statusFilter === "all" ? true : m.status === statusFilter,
-    );
-  }, [group, statusFilter]);
+    return group.matches.filter((m) => visibleIds.has(m.product_id));
+  }, [group, visibleIds]);
+
+  const counts = useMemo(() => {
+    const base = { pending: 0, accepted: 0, rejected: 0, total: 0 };
+    if (!group) return base;
+    for (const m of group.matches) {
+      base[m.status] += 1;
+      base.total += 1;
+    }
+    return base;
+  }, [group]);
 
   const updateStatus = (matchId: string, status: MatchStatus) => {
     if (!group) return;
@@ -83,6 +113,7 @@ function ReviewConsole() {
           : g,
       ),
     );
+    toast.success("Decision saved");
   };
 
   const bulkUpdate = (status: MatchStatus) => {
@@ -100,15 +131,22 @@ function ReviewConsole() {
           : g,
       ),
     );
+    toast.success(
+      `${ids.size} match${ids.size === 1 ? "" : "es"} marked ${status}`,
+    );
+  };
+
+  const refreshList = () => {
+    if (!group) return;
+    const ids = group.matches
+      .filter((m) => (statusFilter === "all" ? true : m.status === statusFilter))
+      .map((m) => m.product_id);
+    setVisibleIds(new Set(ids));
   };
 
   const goPrev = () => setIndex((i) => Math.max(0, i - 1));
   const goNext = () =>
     setIndex((i) => Math.min(filteredGroups.length - 1, i + 1));
-
-  const pendingCount = group
-    ? group.matches.filter((m) => m.status === "pending").length
-    : 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -179,13 +217,6 @@ function ReviewConsole() {
                   of {filteredGroups.length}
                 </span>
                 <span>•</span>
-                <span>
-                  <span className="font-medium text-foreground">
-                    {pendingCount}
-                  </span>{" "}
-                  pending matches
-                </span>
-                <span>•</span>
                 <span>{MAPPING_TYPE_LABEL[group.mainProduct.mapping_type]}</span>
               </div>
               <div className="flex items-center gap-2">
@@ -208,14 +239,46 @@ function ReviewConsole() {
               </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-              <MainProductCard group={group} />
+            <div className="grid items-start gap-6 lg:grid-cols-[380px_1fr]">
+              <div className="lg:sticky lg:top-6">
+                <MainProductCard group={group} />
+              </div>
               <div>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-sm font-medium text-muted-foreground">
-                    Matched products ({visibleMatches.length})
-                  </h2>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+                    <h2 className="font-medium">
+                      Matched products ({counts.total})
+                    </h2>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">
+                      Pending{" "}
+                      <span className="font-medium text-foreground">
+                        {counts.pending}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">
+                      Accepted{" "}
+                      <span className="font-medium text-emerald-600">
+                        {counts.accepted}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">
+                      Rejected{" "}
+                      <span className="font-medium text-rose-600">
+                        {counts.rejected}
+                      </span>
+                    </span>
+                  </div>
                   <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={refreshList}
+                    >
+                      <RotateCcw className="mr-1 h-4 w-4" /> Refresh
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -240,7 +303,7 @@ function ReviewConsole() {
                     review.
                   </Card>
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
                     {visibleMatches.map((m) => (
                       <MatchCard
                         key={m.product_id}
