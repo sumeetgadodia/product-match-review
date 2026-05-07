@@ -325,7 +325,7 @@ function ReviewConsole() {
 function MainProductCard({ group }: { group: MappingGroup }) {
   const p = group.mainProduct;
   return (
-    <Card className="sticky top-6 h-fit overflow-hidden">
+    <Card className="h-fit overflow-hidden">
       <ZoomableImage src={p.image_url} alt={p.title} className="aspect-[3/4]" />
       <div className="space-y-3 p-4">
         <Badge variant="secondary" className="text-xs">
